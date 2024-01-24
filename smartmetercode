@@ -1,0 +1,102 @@
+#include <Ultrasonic.h>
+
+#include <LiquidCrystal_I2C.h>
+#include <EmonLib.h>
+#include <EEPROM.h>
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <BlynkSimpleEsp32.h>
+#define BLYNK_PRINT Serial
+LiquidCrystal_I2C lcd(0x3F, 16, 2);
+EnergyMonitor emon;
+#define vCalibration 152.72
+#define currCalibration 0.495
+BlynkTimer timer;
+char auth[] = "sbPiHlODHYqhWgRx_g6DZg6QXt_HlXd2";
+char ssid[] = "minta";
+char pass[] = "233870minta@";
+float kWh = 0;
+unsigned long lastmillis = millis();
+// Tariff slabs
+#define SLAB_1_THRESHOLD 1 // Threshold for slab 1
+#define SLAB_2_THRESHOLD 2 // Threshold for slab 2
+// Tariff rates for different slabs
+#define RATE_SLAB_1 3 // Rate for slab 1 in rupees per unit
+#define RATE_SLAB_2 5 // Rate for slab 2 in rupees per unit
+#define RATE_SLAB_3 7 // Rate for slab 3 in rupees per unit
+void myTimerEvent()
+{
+  emon.calcVI(20, 2000);
+  kWh = kWh + emon.apparentPower * (millis() - lastmillis) / 3600000000.0;
+  yield();
+  // Calculate tariff
+  float tariff = 0;
+  if (kWh <= SLAB_1_THRESHOLD) {
+    tariff = kWh * RATE_SLAB_1;
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("TARRIF 1");
+  } else if (kWh <= SLAB_2_THRESHOLD) {
+    tariff = SLAB_1_THRESHOLD * RATE_SLAB_1 + (kWh - SLAB_1_THRESHOLD) * RATE_SLAB_2;
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("TARRIF 2");
+  } else {
+    tariff = SLAB_1_THRESHOLD * RATE_SLAB_1 + (SLAB_2_THRESHOLD - SLAB_1_THRESHOLD) * RATE_SLAB_2 + (kWh - SLAB_2_THRESHOLD) * RATE_SLAB_3;
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("TARRIF 3");
+  }
+  Serial.print("Vrms: ");
+  Serial.print(emon.Vrms, 2);
+  Serial.print("V");
+  EEPROM.put(0, emon.Vrms);
+  delay(100);
+  Serial.print("\tIrms: ");
+  Serial.print(emon.Irms, 4);
+  Serial.print("A");
+  EEPROM.put(4, emon.Irms);
+  delay(100);
+  Serial.print("\tPower: ");
+  Serial.print(emon.apparentPower, 4);
+  Serial.print("W");
+  EEPROM.put(8, emon.apparentPower);
+  delay(100);
+  Serial.print("\tkWh: ");
+  Serial.print(kWh, 5);
+  Serial.println("kWh");
+  EEPROM.put(12, kWh);
+  // Display values on LCD
+  lcd.setCursor(0, 1);
+  lcd.print("Rs:");
+  lcd.print(tariff, 2);
+  lastmillis = millis();
+  Blynk.virtualWrite(V0, emon.Vrms);
+  Blynk.virtualWrite(V1, emon.Irms);
+  Blynk.virtualWrite(V2, emon.apparentPower);
+  Blynk.virtualWrite(V3, kWh);
+  Blynk.virtualWrite(V4, tariff);
+}
+void setup()
+{
+  Serial.begin(115200);
+  Blynk.begin(auth, ssid, pass);
+  lcd.init();
+  lcd.backlight();
+  emon.voltage(35, vCalibration, 1.7);  // Voltage: input pin, calibration, phase_shift
+  emon.current(34, currCalibration);    // Current: input pin, calibration.
+  timer.setInterval(5000L, myTimerEvent);
+  lcd.setCursor(3, 0);
+  lcd.print("IoT Energy");
+  lcd.setCursor(5, 1);
+  lcd.print("Meter");
+  delay(3000);
+  lcd.clear();
+}
+void loop()
+{
+  Blynk.run();
+  timer.run();
+}
+
+
